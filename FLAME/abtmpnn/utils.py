@@ -92,7 +92,8 @@ def load_checkpoint(path: str,
         debug = info = print
 
     # Load model and args
-    state = torch.load(path, map_location=lambda storage, loc: storage)
+   # state = torch.load(path, map_location=lambda storage, loc: storage)
+    state = torch.load(path, map_location=lambda storage, loc: storage, weights_only=False)
     args = TrainArgs()
     args.from_dict(vars(state['args']), skip_unsettable=True)
     # args = vars(state['args'])
@@ -146,7 +147,7 @@ def load_scalers(path: str) -> Tuple[StandardScaler, StandardScaler, StandardSca
     :return: A tuple with the data :class:`~abtmpnn.data.scaler.StandardScaler`
              and features :class:`~abtmpnn.data.scaler.StandardScaler`.
     """
-    state = torch.load(path, map_location=lambda storage, loc: storage)
+    state = torch.load(path, map_location=lambda storage, loc: storage, weights_only=False)
 
     scaler = StandardScaler(state['data_scaler']['means'],
                             state['data_scaler']['stds']) if state['data_scaler'] is not None else None
@@ -179,8 +180,12 @@ def load_args(path: str) -> TrainArgs:
     :return: The :class:`~abtmpnn.args.TrainArgs` object that the model was trained with.
     """
     args = TrainArgs()
-    args.from_dict(vars(torch.load(path, map_location=lambda storage, loc: storage)[
+    # args.from_dict(vars(torch.load(path, map_location=lambda storage, loc: storage)[
+    #                'args']), skip_unsettable=True)
+    args.from_dict(vars(torch.load(path, map_location=lambda storage, loc: storage, weights_only=False)[
                    'args']), skip_unsettable=True)
+
+
     # args = vars(torch.load(path, map_location=lambda storage, loc: storage)['args'])
 
     return args

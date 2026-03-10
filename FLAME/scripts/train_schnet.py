@@ -4,7 +4,8 @@ import os
 if __name__ == '__main__':
     epoch = 100
     targets = ['abs', 'emi', 'plqy', 'e']
-    for data_base in ['deep4chem', 'FluoDB']:
+    # for data_base in ['deep4chem', 'FluoDB']:
+    for data_base in [ 'FluoDB']:
         for target in targets:
             train_data = f'data/schnet/{data_base}/{target}_train.db'
             test_data = f'data/schnet/{data_base}/{target}_test.db'

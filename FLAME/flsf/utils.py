@@ -10,6 +10,9 @@ import re
 from time import time
 from typing import Any, Callable, List, Tuple, Union
 
+import numpy as np
+from numpy import ndarray, dtype
+from numpy.core.multiarray import _reconstruct
 from sklearn.metrics import auc, mean_absolute_error, mean_squared_error, precision_recall_curve, r2_score,\
     roc_auc_score, accuracy_score, log_loss
 import torch
@@ -22,6 +25,13 @@ from FLAME.flsf.args import PredictArgs, TrainArgs
 from FLAME.dataprocess.flsf.data import StandardScaler, MoleculeDataset, preprocess_smiles_columns, get_task_names
 from FLAME.flsf.models import MoleculeModel
 from FLAME.nn_utils import NoamLR
+
+# Allow torch.load (PyTorch >= 2.6) to unpickle additional globals stored in checkpoints
+try:
+    torch.serialization.add_safe_globals([Namespace, _reconstruct, ndarray, dtype])
+except AttributeError:
+    # Older Torch versions (<2.6) do not expose add_safe_globals
+    pass
 
 
 def makedirs(path: str, isfile: bool = False) -> None:
@@ -92,7 +102,7 @@ def load_checkpoint(path: str,
         debug = info = print
 
     # Load model and args
-    state = torch.load(path, map_location=lambda storage, loc: storage)
+    state = torch.load(path, map_location=lambda storage, loc: storage, weights_only=False)
     args = TrainArgs()
     args.from_dict(vars(state['args']), skip_unsettable=True)
     # args = vars(state['args'])

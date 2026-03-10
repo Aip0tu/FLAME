@@ -156,6 +156,9 @@ class Trainer:
         self._optimizer_to(device)
         self._stop = False
 
+        print(f"Starting training on device: {device}")
+        print(f"Total epochs: {n_epochs}, Current epoch: {self.epoch}")
+
         for h in self.hooks:
             h.on_train_begin(self)
 
@@ -163,6 +166,9 @@ class Trainer:
             for _ in range(n_epochs):
                 # increase number of epochs by 1
                 self.epoch += 1
+                print(f"\n{'=' * 50}")
+                print(f"Epoch {self.epoch} started")
+                print(f"{'=' * 50}")
 
                 for h in self.hooks:
                     h.on_epoch_begin(self)
@@ -179,23 +185,41 @@ class Trainer:
                 train_iter = self.train_loader
 
                 self._model.train()
+                batch_count = 0
+                total_batches = len(self.train_loader)
+                print(f"Total batches: {total_batches}")
                 for train_batch in train_iter:
+                    batch_count += 1
                     self.optimizer.zero_grad()
 
                     for h in self.hooks:
                         h.on_batch_begin(self, train_batch)
 
                     # move input to gpu, if needed
+                    # 监控数据移动
+                    if batch_count == 1:
+                        print(f"Moving batch {batch_count} to device...")
                     train_batch = {k: v.to(device) for k, v in train_batch.items()}
+                    if batch_count == 1:
+                        print(f"Batch {batch_count} moved to device, running forward pass...")
 
                     result = self._model(train_batch)
+                    if batch_count == 1:
+                        print(f"Forward pass complete, computing loss...")
                     loss = self.loss_fn(train_batch, result)
+                    if batch_count == 1:
+                        print(f"Loss computed: {loss.item():.6f}, running backward pass...")
                     loss.backward()
+                    if batch_count == 1:
+                        print(f"Backward pass complete, optimizing...")
                     self.optimizer.step()
                     self.step += 1
 
                     for h in self.hooks:
                         h.on_batch_end(self, train_batch, result, loss)
+                    # 每10个batch打印一次进度
+                    if batch_count % 10 == 0:
+                        print(f"  Completed batch {batch_count}/{total_batches}, loss: {loss.item():.6f}")
 
                     if self._stop:
                         break

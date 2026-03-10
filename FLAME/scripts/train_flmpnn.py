@@ -3,7 +3,8 @@ from FLAME import flsf_train
 if __name__ == '__main__':
     epoch = 50
     targets = ['abs', 'emi', 'plqy', 'e']
-    for data_base in ['deep4chem', 'FluoDB']:
+    # for data_base in ['deep4chem', 'FluoDB']:
+    for data_base in [ 'FluoDB']:
         for target in targets:
             train_data = f'data/{data_base}/{target}_train.csv'
             test_data = f'data/{data_base}/{target}_test.csv'

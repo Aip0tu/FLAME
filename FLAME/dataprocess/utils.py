@@ -1176,16 +1176,32 @@ def get_solvent_df(df_origin, solmap, thd = 10):
     print(f'{len(df)} data , {len(df.solvent.unique())} after')
     return df.reset_index(drop=True), df_mix
 
-def merge_item(data):
+def merge_item(data, delta=5):
+    """
+    Merge duplicate data items.
+    
+    Args:
+        data: DataFrame with duplicate entries
+        delta: threshold for difference (default: 5 for wavelength in nm, 
+                adjusted internally for plqy and e/m-1cm-1)
+    """
     ddf = data.copy()
     ddf['plqy'] = ddf['plqy']*100
     ddf['e/m-1cm-1'] = np.log10(ddf['e/m-1cm-1'])*200
     res = data.copy()[:1]
     keys = ['absorption/nm', 'emission/nm', 'e/m-1cm-1', 'plqy']
+    # Define delta thresholds for each key (after transformation)
+    delta_dict = {
+        'absorption/nm': delta,  # 5 nm
+        'emission/nm': delta,    # 5 nm
+        'e/m-1cm-1': 0.02 * 200,  # 0.02 for log10(εmax) -> 4 in transformed scale
+        'plqy': 0.1 * 100  # 0.1 for PLQY -> 10 in transformed scale
+    }
     flag = False
     for key in keys:
         res[key] = np.round(ddf[key].mean()*10)/10
-        if np.any((np.abs(ddf[key]-res[key].values[0]))> delta):
+        delta_threshold = delta_dict[key]
+        if np.any((np.abs(ddf[key]-res[key].values[0]))> delta_threshold):
             res[key] = np.nan
         flag |= np.any(res[key] != np.nan)
     res['plqy'] = res['plqy']/100
