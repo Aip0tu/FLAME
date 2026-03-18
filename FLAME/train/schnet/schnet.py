@@ -127,6 +127,7 @@ def get_test_dataset(data_path):
 
 def schnet_predict(model_path, output_file, input_file='', smiles=[]):
     best_model = torch.load(model_path+'/best_model')
+    # best_model = torch.load(model_path)
     if len(smiles)==0:
         if len(input_file)==0:
             raise ValueError("At least One input: file or smiles")
@@ -155,6 +156,7 @@ def schnet_predict(model_path, output_file, input_file='', smiles=[]):
         })
         data_path = 'schnet_tmp.db'
         get_schnet_data(smiles, np.zeros(len(smiles)), df.index.values, save_path=data_path, conf_num=1)
+        # get_schnet_data(smiles, np.zeros(len(df)), df.index.values, save_path=data_path, conf_num=1)
         test_loader = get_test_dataset(data_path)
         pred = np.array([])
         indices = np.array([])
@@ -162,7 +164,7 @@ def schnet_predict(model_path, output_file, input_file='', smiles=[]):
             result = best_model(batch)['energy'].detach().numpy()
             pred = np.concatenate([pred, result.reshape(-1)])
             indices = np.concatenate([indices, batch['indices'].detach().numpy().reshape(-1)])
-    
+
     # if model_path.split('/')[-2].find('abs') > -1 or model_path.split('/')[-2].find('emi') > -1:
     #     pred = 1240./np.array(pred)
     df.loc[indices, 'pred'] = pred

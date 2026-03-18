@@ -5,21 +5,24 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem
 
 
+# 分子可以是SMILES字符串或RDKit分子对象
 Molecule = Union[str, Chem.Mol]
+# 特征生成器是接受分子返回numpy数组的函数
 FeaturesGenerator = Callable[[Molecule], np.ndarray]
 
-
+# 全局字典，存储所有注册的特征生成器
 FEATURES_GENERATOR_REGISTRY = {}
 
 # define a decorator
 def register_features_generator(features_generator_name: str) -> Callable[[FeaturesGenerator], FeaturesGenerator]:
     """
-    Creates a decorator which registers a features generator in a global dictionary to enable access by name.
+    创建一个装饰器，将特征生成器注册到全局字典中，以便通过名称访问。
 
-    :param features_generator_name: The name to use to access the features generator.
-    :return: A decorator which will add a features generator to the registry using the specified name.
+    :param features_generator_name: 访问特征生成器时使用的名称
+    :return: 一个装饰器，将特征生成器添加到注册表中
     """
     def decorator(features_generator: FeaturesGenerator) -> FeaturesGenerator:
+        # 将特征生成器函数注册到全局字典中
         FEATURES_GENERATOR_REGISTRY[features_generator_name] = features_generator
         return features_generator
 
