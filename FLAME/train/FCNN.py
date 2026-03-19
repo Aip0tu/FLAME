@@ -68,13 +68,18 @@ def get_sch():
     return tf.keras.callbacks.LearningRateScheduler(scheduler)
 
 def show_his(history):
-    plt.figure(figsize=(10, 6))
-    plt.plot(history.history["loss"], label="train loss")
-    plt.plot(history.history["val_loss"], label="valid loss")
-    plt.xlabel("Epochs", fontsize=16)
-    plt.ylabel("LOSS", fontsize=16)
-    plt.legend(fontsize=16)
-    plt.show()
+    try:
+        plt.figure(figsize=(10, 6))
+        plt.plot(history.history["loss"], label="train loss")
+        plt.plot(history.history["val_loss"], label="valid loss")
+        plt.xlabel("Epochs", fontsize=16)
+        plt.ylabel("LOSS", fontsize=16)
+        plt.legend(fontsize=16)
+        plt.show()
+    except KeyError as e:
+        print(f"绘图失败：缺少指标 {e}，请检查训练时的监控指标")
+    except Exception as e:
+        print(f"绘图异常：{e}")
     
 def fcnn_predict(model_path, output_file, input_file='', smiles=None):
     if os.path.exists(output_file):
@@ -122,3 +127,44 @@ def fcnn_train(model_path, train_data, valid_data, test_data, epoch=2000):
     )
     with open(f'{model_path}.pkl', 'wb') as file:
         pickle.dump(history, file)
+
+
+
+
+def load_and_show_history(pkl_file_path):
+    if not os.path.exists(pkl_file_path):
+        raise ValueError(f"History file {pkl_file_path} not exist!")
+
+    with open(pkl_file_path, 'rb') as f:
+        loaded_history = pickle.load(f)
+
+    show_his(loaded_history)
+
+def load_and_show_history1(pkl_file_path):
+    import pickle
+    import matplotlib.pyplot as plt
+
+    with open(pkl_file_path, 'rb') as f:
+        history = pickle.load(f)
+
+    if hasattr(history, "history"):
+        history_dict = history.history
+    else:
+        history_dict = history
+
+    save_path = pkl_file_path.replace(".pkl", ".png")
+
+    plt.figure(figsize=(10,6))
+    plt.plot(history_dict.get("loss", []), label="train loss")
+
+    if "val_loss" in history_dict:
+        plt.plot(history_dict["val_loss"], label="val loss")
+
+    plt.legend()
+
+    # ✅ 保存
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"图已保存到: {save_path}")
+
+    plt.show()
+
