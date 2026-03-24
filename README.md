@@ -85,6 +85,34 @@ from FLAME import flsf_predict
 result = flsf_predict(model_path, smiles=SMILES)
 ```
 
+Atom-level masking explainability for FLSF:
+```
+from FLAME import flsf_atom_explain
+
+result = flsf_atom_explain(
+    model_path='model/flsf/FluoDB_emi',
+    fluorophore_smiles='O=c1oc2ccccc2cc1',
+    solvent_smiles='CCO',
+    output_csv='pred/flsf_explain/coumarin.csv',
+    output_png='pred/flsf_explain/coumarin.png'
+)
+```
+The returned table contains the baseline prediction, the masked prediction for each atom, and the atom contribution
+(`baseline - masked_prediction`). For wavelength tasks, a positive contribution indicates a redshift contribution.
+
+To explain multiple targets (`abs`, `emi`, `plqy`, `e`) together and save them into one CSV:
+```
+from FLAME import flsf_atom_explain_all_targets
+
+result = flsf_atom_explain_all_targets(
+    model_root='model/flsf',
+    model_prefix='FluoDB',
+    fluorophore_smiles='Cc2coc3c(Cl)cc1c(C)cc(=O)oc1c23',
+    solvent_smiles='O',
+    output_csv='pred/flsf_explain/all_targets.csv'
+)
+```
+
 ## Reinvent FLAME_plugin
 
 We provided a FLAME_plugin for Reinvent to molecule design and molecuar optimization.
