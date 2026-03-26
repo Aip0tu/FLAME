@@ -12,8 +12,10 @@ if __name__ == '__main__':
         for model in [ 'FluoDB']:
             for target in targets:
                 model_path = f'model/abtmpnn/{model}_{target}/fold_0/model_0'
-                input_file = f'data/{data_base}/{target}_test.csv'
-                output_file = f'pred/{data_base}/abtmpnn_{model}_{target}.csv'
+                # input_file = f'data/{data_base}/{target}_test.csv'
+                # output_file = f'pred/{data_base}/abtmpnn_{model}_{target}.csv'
+                input_file = f'data/{data_base}/pre.csv'
+                output_file = f'pred/test/abtmpnn_{target}_2.csv'
                 if not os.path.exists(f'pred/{data_base}/'):
                     os.makedirs(f'pred/{data_base}/')
                 print(model_path, input_file, output_file)

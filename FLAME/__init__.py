@@ -1,6 +1,6 @@
 from FLAME.train.chemprop import uvvisml_train, uvvisml_predict
 from FLAME.train.abtmpnn import abtmpnn_train, abtmpnn_predict
-from FLAME.train.flsf import flsf_train, flsf_predict, get_flsf_latent, flsf_atom_explain, flsf_atom_explain_all_targets, draw_flsf_atom_attribution
+from FLAME.train.flsf import flsf_train, flsf_predict, get_flsf_latent, flsf_atom_explain, flsf_atom_explain_all_targets, flsf_group_mask_explain_all_targets, draw_flsf_atom_attribution, draw_flsf_mask_group
 from FLAME.train.schnet import schnet_train, schnet_predict
 from FLAME.train.GBRT import gbrt_train, gbrt_predict
 from FLAME.train.FCNN import fcnn_train, fcnn_predict, show_his, load_and_show_history,load_and_show_history1
@@ -18,7 +18,9 @@ __all__ = [
     'get_flsf_latent',
     'flsf_atom_explain',
     'flsf_atom_explain_all_targets',
+    'flsf_group_mask_explain_all_targets',
     'draw_flsf_atom_attribution',
+    'draw_flsf_mask_group',
     'uvvisml_predict',
     'abtmpnn_train',
     'abtmpnn_predict',

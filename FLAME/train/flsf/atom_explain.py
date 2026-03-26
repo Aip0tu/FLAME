@@ -1,5 +1,7 @@
 import copy
+import json
 import os
+import re
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
@@ -46,10 +48,31 @@ def _mask_atom_features(batch_graph, mol_index: int, atom_index: int) -> None:
             batch_graph.f_bonds[bond_index, :batch_graph.atom_fdim] = 0
 
 
+def _mask_atom_group_features(batch_graph, mol_index: int, atom_indices: Sequence[int]) -> None:
+    for atom_index in sorted(set(atom_indices)):
+        _mask_atom_features(batch_graph, mol_index, atom_index)
+
+
 def _prepare_masked_batch(smiles_pair: Sequence[str],
                           atom_indices: Sequence[int],
                           features_generator: Optional[List[str]]) -> MoleculeDataset:
     repeated_smiles = [list(smiles_pair) for _ in range(len(atom_indices) + 1)]
+    dataset = get_data_from_smiles(
+        smiles=repeated_smiles,
+        skip_invalid_smiles=False,
+        features_generator=features_generator
+    )
+
+    if len(dataset) == 0 or any(mol is None for mol in dataset[0].mol):
+        raise ValueError('Invalid fluorophore or solvent SMILES.')
+
+    return dataset
+
+
+def _prepare_group_masked_batch(smiles_pair: Sequence[str],
+                                mask_groups: Dict[str, Sequence[int]],
+                                features_generator: Optional[List[str]]) -> MoleculeDataset:
+    repeated_smiles = [list(smiles_pair) for _ in range(len(mask_groups) + 1)]
     dataset = get_data_from_smiles(
         smiles=repeated_smiles,
         skip_invalid_smiles=False,
@@ -69,6 +92,36 @@ def _predict_masked_batch(model,
     batch_graphs = _clone_batch_graphs(dataset.batch_graph())
     for masked_row, atom_index in enumerate(masked_atom_indices, start=1):
         _mask_atom_features(batch_graphs[0], masked_row, atom_index)
+
+    features_batch = dataset.features()
+    mol_adj_batch = dataset.adj_features()
+    mol_dist_batch = dataset.dist_features()
+    mol_clb_batch = dataset.clb_features()
+
+    with torch.no_grad():
+        batch_preds = model(
+            batch_graphs,
+            features_batch,
+            mol_adj_batch,
+            mol_dist_batch,
+            mol_clb_batch
+        )
+
+    batch_preds = np.asarray(batch_preds.data.cpu().numpy(), dtype=float)
+    if scaler is not None:
+        batch_preds = scaler.inverse_transform(batch_preds)
+        batch_preds = np.asarray(batch_preds, dtype=float)
+
+    return batch_preds
+
+
+def _predict_group_masked_batch(model,
+                                scaler,
+                                dataset: MoleculeDataset,
+                                mask_groups: Dict[str, Sequence[int]]) -> np.ndarray:
+    batch_graphs = _clone_batch_graphs(dataset.batch_graph())
+    for masked_row, atom_indices in enumerate(mask_groups.values(), start=1):
+        _mask_atom_group_features(batch_graphs[0], masked_row, atom_indices)
 
     features_batch = dataset.features()
     mol_adj_batch = dataset.adj_features()
@@ -116,6 +169,13 @@ def _score_to_color(score: float, max_abs_score: float) -> tuple:
     return (1.0 - fade, 1.0 - fade, 1.0)
 
 
+def _safe_file_stem(text: str, max_len: int = 80) -> str:
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '_', text).strip('_')
+    if not stem:
+        stem = 'molecule'
+    return stem[:max_len]
+
+
 def draw_flsf_atom_attribution(smiles: str,
                                attribution: pd.DataFrame,
                                output_path: str,
@@ -144,6 +204,42 @@ def draw_flsf_atom_attribution(smiles: str,
     drawer = rdMolDraw2D.MolDraw2DCairo(900, 700)
     options = drawer.drawOptions()
     options.addAtomIndices = False
+    options.legendFontSize = 24
+    drawer.DrawMolecule(
+        draw_mol,
+        legend=legend,
+        highlightAtoms=highlight_atoms,
+        highlightAtomColors=highlight_colors,
+        highlightAtomRadii=highlight_radii
+    )
+    drawer.FinishDrawing()
+
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    with open(output_path, 'wb') as f:
+        f.write(drawer.GetDrawingText())
+
+    return output_path
+
+
+def draw_flsf_mask_group(smiles: str,
+                         atom_indices: Sequence[int],
+                         output_path: str,
+                         legend: str = '',
+                         color: tuple = (1.0, 0.82, 0.82)) -> str:
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f'Invalid fluorophore SMILES: {smiles}')
+
+    draw_mol = Chem.Mol(mol)
+    highlight_atoms = sorted(set(int(i) for i in atom_indices))
+    highlight_colors = {atom_index: color for atom_index in highlight_atoms}
+    highlight_radii = {atom_index: 0.4 for atom_index in highlight_atoms}
+
+    for atom in draw_mol.GetAtoms():
+        atom.SetProp('atomNote', str(atom.GetIdx()))
+
+    drawer = rdMolDraw2D.MolDraw2DCairo(900, 700)
+    options = drawer.drawOptions()
     options.legendFontSize = 24
     drawer.DrawMolecule(
         draw_mol,
@@ -271,11 +367,14 @@ def flsf_atom_explain(model_path: str,
 
     if output_png:
         legend = f'Baseline: {baseline[0]:.3f}' if len(task_names) == 1 else ''
+        score_column = f'contribution_{task_names[0]}' if len(task_names) >= 1 else 'contribution'
+        if score_column not in result.columns and 'contribution' in result.columns:
+            score_column = 'contribution'
         draw_flsf_atom_attribution(
             smiles=fluorophore_smiles,
             attribution=result,
             output_path=output_png,
-            score_column='contribution' if len(task_names) == 1 else f'contribution_{task_names[0]}',
+            score_column=score_column,
             legend=legend
         )
 
@@ -289,6 +388,7 @@ def flsf_atom_explain_all_targets(model_root: str,
                                   targets: Sequence[str] = ('abs', 'emi', 'plqy', 'e'),
                                   atom_indices: Optional[Iterable[int]] = None,
                                   output_csv: str = '',
+                                  output_png_dir: str = '',
                                   no_cuda: bool = False) -> pd.DataFrame:
     """
     Runs atom-level masking explainability for multiple targets and merges the results into a single table.
@@ -308,11 +408,17 @@ def flsf_atom_explain_all_targets(model_root: str,
 
     for target in targets:
         model_path = os.path.join(model_root, f'{model_prefix}_{target}')
+        output_png = ''
+        if output_png_dir:
+            os.makedirs(output_png_dir, exist_ok=True)
+            file_stem = _safe_file_stem(fluorophore_smiles)
+            output_png = os.path.join(output_png_dir, f'{file_stem}_{target}.png')
         target_df = flsf_atom_explain(
             model_path=model_path,
             fluorophore_smiles=fluorophore_smiles,
             solvent_smiles=solvent_smiles,
             atom_indices=atom_indices,
+            output_png=output_png,
             no_cuda=no_cuda,
             include_generic_aliases=False
         ).copy()
@@ -353,3 +459,130 @@ def flsf_atom_explain_all_targets(model_root: str,
         merged.to_csv(output_csv, index=False)
 
     return merged
+
+
+def flsf_group_mask_explain_all_targets(model_root: str,
+                                        fluorophore_smiles: str,
+                                        solvent_smiles: str,
+                                        mask_groups: Dict[str, Sequence[int]],
+                                        model_prefix: str = 'FluoDB',
+                                        targets: Sequence[str] = ('abs', 'emi', 'plqy', 'e'),
+                                        output_csv: str = '',
+                                        output_png_dir: str = '',
+                                        no_cuda: bool = False) -> pd.DataFrame:
+    """
+    Masks predefined atom groups instead of single atoms and compares predictions before and after masking.
+    Each row in the result corresponds to one group.
+    """
+    if not mask_groups:
+        raise ValueError('mask_groups cannot be empty.')
+
+    fluorophore = Chem.MolFromSmiles(fluorophore_smiles)
+    if fluorophore is None:
+        raise ValueError(f'Invalid fluorophore SMILES: {fluorophore_smiles}')
+
+    all_atoms = set(range(fluorophore.GetNumAtoms()))
+    normalized_groups: Dict[str, List[int]] = {}
+    for group_name, atom_indices in mask_groups.items():
+        indices = sorted(set(int(i) for i in atom_indices))
+        invalid = sorted(set(indices) - all_atoms)
+        if invalid:
+            raise ValueError(f'Group "{group_name}" contains atom indices out of range: {invalid}')
+        normalized_groups[group_name] = indices
+
+    first_target = targets[0]
+    example_model_path = os.path.join(model_root, f'{model_prefix}_{first_target}')
+    args = _build_predict_args(model_path=example_model_path, no_cuda=no_cuda)
+    train_args = load_args(args.checkpoint_paths[0])
+    update_prediction_args(predict_args=args, train_args=train_args)
+    args: TrainArgs
+
+    if args.atom_descriptors == 'feature':
+        set_extra_atom_fdim(train_args.atom_features_size)
+    if args.bond_features_path is not None:
+        set_extra_bond_fdim(train_args.bond_features_size)
+
+    dataset = _prepare_group_masked_batch(
+        smiles_pair=[fluorophore_smiles, solvent_smiles],
+        mask_groups=normalized_groups,
+        features_generator=args.features_generator
+    )
+
+    base_records = []
+    for group_name, atom_indices in normalized_groups.items():
+        base_records.append({
+            'fluorophore_smiles': fluorophore_smiles,
+            'solvent_smiles': solvent_smiles,
+            'group_name': group_name,
+            'atom_indices': json.dumps(atom_indices),
+            'atom_count': len(atom_indices)
+        })
+    result = pd.DataFrame(base_records)
+
+    for target in targets:
+        model_path = os.path.join(model_root, f'{model_prefix}_{target}')
+        args = _build_predict_args(model_path=model_path, no_cuda=no_cuda)
+        train_args = load_args(args.checkpoint_paths[0])
+        update_prediction_args(predict_args=args, train_args=train_args)
+        args: TrainArgs
+
+        num_tasks = train_args.num_tasks
+        sum_preds = np.zeros((len(normalized_groups) + 1, num_tasks))
+
+        for checkpoint_path in args.checkpoint_paths:
+            model = load_checkpoint(checkpoint_path, device=args.device)
+            scaler, features_scaler, atom_descriptor_scaler, bond_feature_scaler = load_scalers(checkpoint_path)
+
+            if args.features_scaling or train_args.atom_descriptor_scaling or train_args.bond_feature_scaling:
+                dataset.reset_features_and_targets()
+                if args.features_scaling:
+                    dataset.normalize_features(features_scaler)
+                if train_args.atom_descriptor_scaling and args.atom_descriptors is not None:
+                    dataset.normalize_features(atom_descriptor_scaler, scale_atom_descriptors=True)
+                if train_args.bond_feature_scaling and args.bond_features_size > 0:
+                    dataset.normalize_features(bond_feature_scaler, scale_bond_features=True)
+
+            model_preds = _predict_group_masked_batch(
+                model=model,
+                scaler=scaler,
+                dataset=dataset,
+                mask_groups=normalized_groups
+            )
+            sum_preds += np.asarray(model_preds, dtype=float)
+
+        avg_preds = sum_preds / len(args.checkpoint_paths)
+        baseline = float(avg_preds[0, 0])
+        masked_preds = avg_preds[1:, 0]
+
+        result[f'baseline_{target}'] = baseline
+        result[f'masked_{target}'] = masked_preds
+        result[f'contribution_{target}'] = baseline - masked_preds
+        result[f'abs_contribution_{target}'] = result[f'contribution_{target}'].abs()
+        result[f'importance_rank_{target}'] = result[f'abs_contribution_{target}'].rank(
+            method='dense',
+            ascending=False
+        ).astype(int)
+
+    overall_abs_columns = [f'abs_contribution_{target}' for target in targets]
+    result['max_abs_contribution'] = result[overall_abs_columns].max(axis=1)
+    result['overall_importance_rank'] = result['max_abs_contribution'].rank(
+        method='dense',
+        ascending=False
+    ).astype(int)
+
+    if output_csv:
+        os.makedirs(os.path.dirname(output_csv) or '.', exist_ok=True)
+        result.to_csv(output_csv, index=False)
+
+    if output_png_dir:
+        os.makedirs(output_png_dir, exist_ok=True)
+        for idx, (group_name, atom_indices) in enumerate(normalized_groups.items(), start=1):
+            output_path = os.path.join(output_png_dir, f'{idx:02d}_{_safe_file_stem(group_name)}.png')
+            draw_flsf_mask_group(
+                smiles=fluorophore_smiles,
+                atom_indices=atom_indices,
+                output_path=output_path,
+                legend=group_name
+            )
+
+    return result

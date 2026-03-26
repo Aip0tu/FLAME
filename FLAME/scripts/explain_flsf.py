@@ -1,30 +1,47 @@
 import argparse
 import os
+import re
 
 import pandas as pd
 
 from FLAME import flsf_atom_explain, flsf_atom_explain_all_targets
 
 
+# EXAMPLE_FLUOROPHORES = [
+#     "Cc2coc3c(Cl)cc1c(C)cc(=O)oc1c23",
+#     "CN(C)c5ccc4nc(/C=C/c1cc2CCCN3CCCc(c1)c23)c(=O)oc4c5",
+#     "O=c3oc2ccc1ccc(O)cc1c2nc3c4ccccc4",
+#     "N#Cc2cc1ccccc1oc2=O",
+#     "CCN(CC)c2ccc1cc(C#N)c(=NC(=O)C(C)C)oc1c2",
+#     "N#Cc2cc1ccc(O)cc1oc2=N",
+#     "CCN(CC)c3ccc2cc(C#N)c(=NC(=O)c1ccccc1)oc2c3"
+# ]
+#
+# EXAMPLE_SOLVENTS = [
+#     "O1CCOCC1",
+#     "CCCCCCC",
+#     "c1ccccc1",
+#     "CCOC(=O)C",
+#     "CCO",
+#     "CS(C)=O",
+#     "CCO"
+# ]
 EXAMPLE_FLUOROPHORES = [
-    "Cc2coc3c(Cl)cc1c(C)cc(=O)oc1c23",
-    "CN(C)c5ccc4nc(/C=C/c1cc2CCCN3CCCc(c1)c23)c(=O)oc4c5",
-    "O=c3oc2ccc1ccc(O)cc1c2nc3c4ccccc4",
-    "N#Cc2cc1ccccc1oc2=O",
-    "CCN(CC)c2ccc1cc(C#N)c(=NC(=O)C(C)C)oc1c2",
-    "N#Cc2cc1ccc(O)cc1oc2=N",
-    "CCN(CC)c3ccc2cc(C#N)c(=NC(=O)c1ccccc1)oc2c3"
+    "CCN(CC)c4ccc3nc2c(cc(=O)c1ccc(O)cc12)oc3c4",
+    "CCN(CC)c6ccc5[n-]c4c(cc([O-])c3ccc(Oc2c([O-])c1ccccc1c([O-])c2Cl)cc34)oc5c6",
 ]
 
 EXAMPLE_SOLVENTS = [
-    "O1CCOCC1",
-    "CCCCCCC",
-    "c1ccccc1",
-    "CCOC(=O)C",
-    "CCO",
     "CS(C)=O",
-    "CCO"
+    "CS(C)=O"
 ]
+
+
+def safe_file_stem(text: str, max_len: int = 80) -> str:
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '_', text).strip('_')
+    if not stem:
+        stem = 'molecule'
+    return stem[:max_len]
 
 
 def main():
@@ -40,6 +57,7 @@ def main():
     parser.add_argument('--solvent', default='O', help='Solvent SMILES. Defaults to water.')
     parser.add_argument('--output_dir', default='pred/flsf_explain', help='Directory for CSV and PNG outputs.')
     parser.add_argument('--prefix', default='flsf_atom_explain', help='Output file prefix.')
+    parser.add_argument('--no_images', action='store_true', help='Skip PNG generation.')
     parser.add_argument('--no_cuda', action='store_true', help='Force CPU inference.')
     args = parser.parse_args()
 
@@ -76,25 +94,31 @@ def main():
             fluorophore_smiles=fluorophores[0],
             solvent_smiles=solvent_map[fluorophores[0]],
             output_csv=csv_path,
-            output_png=png_path,
+            output_png='' if args.no_images else png_path,
             no_cuda=args.no_cuda
         )
         print(result.sort_values('abs_contribution', ascending=False).head(10).to_string(index=False))
         print(f'\nSaved CSV to {csv_path}')
-        print(f'Saved figure to {png_path}')
+        if not args.no_images:
+            print(f'Saved figure to {png_path}')
         return
 
     tables = []
-    for fluorophore in fluorophores:
+    image_dirs = []
+    for idx, fluorophore in enumerate(fluorophores, start=1):
+        example_dir = os.path.join(args.output_dir, f'{idx:02d}_{safe_file_stem(fluorophore)}')
         merged = flsf_atom_explain_all_targets(
             model_root=args.model_root,
             fluorophore_smiles=fluorophore,
             solvent_smiles=solvent_map[fluorophore],
             model_prefix=args.model_prefix,
             targets=args.targets,
+            output_png_dir='' if args.no_images else example_dir,
             no_cuda=args.no_cuda
         )
         tables.append(merged)
+        if not args.no_images:
+            image_dirs.append(example_dir)
 
     result = pd.concat(tables, ignore_index=True)
     csv_path = os.path.join(args.output_dir, f'{args.prefix}.csv')
@@ -104,6 +128,10 @@ def main():
     preview_columns = ['fluorophore_smiles', 'atom_index', 'atom_symbol', 'overall_importance_rank'] + rank_columns
     print(result.loc[:, preview_columns].sort_values(['fluorophore_smiles', 'overall_importance_rank']).head(30).to_string(index=False))
     print(f'\nSaved CSV to {csv_path}')
+    if not args.no_images:
+        print('Saved example images under:')
+        for image_dir in image_dirs:
+            print(image_dir)
 
 
 if __name__ == '__main__':
