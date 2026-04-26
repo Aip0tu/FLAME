@@ -27,13 +27,15 @@ from FLAME import flsf_atom_explain, flsf_atom_explain_all_targets
 #     "CCO"
 # ]
 EXAMPLE_FLUOROPHORES = [
-    "CCN(CC)c4ccc3nc2c(cc(=O)c1ccc(O)cc12)oc3c4",
-    "CCN(CC)c6ccc5[n-]c4c(cc([O-])c3ccc(Oc2c([O-])c1ccccc1c([O-])c2Cl)cc34)oc5c6",
+    "Cc1ccc(C(=O)c2cc(C(=O)O)cc3c2CCN3c2c(Cl)cccc2Cl)cc1",
+    "Cc1ccc(C(=O)c2cc(C(=O)O)cc3c2CCN3c2c(Cl)cccc2Cl)cc1",
+
 ]
 
 EXAMPLE_SOLVENTS = [
-    "CS(C)=O",
-    "CS(C)=O"
+    "ClCCl",
+    "O",
+
 ]
 
 
@@ -66,56 +68,77 @@ def main():
         fluorophores.append(args.fluorophore)
     if args.fluorophores:
         fluorophores.extend(args.fluorophores)
-    solvent_map = {}
+    entries = []
 
-    if args.use_examples or not fluorophores:
-        fluorophores.extend(EXAMPLE_FLUOROPHORES)
-        for fluorophore, solvent in zip(EXAMPLE_FLUOROPHORES, EXAMPLE_SOLVENTS):
-            solvent_map[fluorophore] = solvent
+    if fluorophores:
+        if args.solvents is not None:
+            if len(args.solvents) != len(fluorophores):
+                raise ValueError('The number of solvents must match the number of fluorophores.')
+            solvents = list(args.solvents)
+        else:
+            solvents = [args.solvent] * len(fluorophores)
+        entries.extend(zip(fluorophores, solvents))
 
-    # Keep order while removing duplicates.
-    fluorophores = list(dict.fromkeys(fluorophores))
-
-    if args.solvents is not None:
-        if len(args.solvents) != len(fluorophores):
-            raise ValueError('The number of solvents must match the number of fluorophores.')
-        solvent_map = dict(zip(fluorophores, args.solvents))
-
-    for fluorophore in fluorophores:
-        solvent_map.setdefault(fluorophore, args.solvent)
+    if args.use_examples or not entries:
+        if len(EXAMPLE_FLUOROPHORES) != len(EXAMPLE_SOLVENTS):
+            raise ValueError('EXAMPLE_FLUOROPHORES and EXAMPLE_SOLVENTS must have the same length.')
+        entries.extend(zip(EXAMPLE_FLUOROPHORES, EXAMPLE_SOLVENTS))
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     if len(args.targets) == 1 and args.model_path:
-        csv_path = os.path.join(args.output_dir, f'{args.prefix}.csv')
-        png_path = os.path.join(args.output_dir, f'{args.prefix}.png')
-        result = flsf_atom_explain(
-            model_path=args.model_path,
-            fluorophore_smiles=fluorophores[0],
-            solvent_smiles=solvent_map[fluorophores[0]],
-            output_csv=csv_path,
-            output_png='' if args.no_images else png_path,
-            no_cuda=args.no_cuda
-        )
-        print(result.sort_values('abs_contribution', ascending=False).head(10).to_string(index=False))
-        print(f'\nSaved CSV to {csv_path}')
+        tables = []
+        image_paths = []
+        for idx, (fluorophore, solvent) in enumerate(entries, start=1):
+            entry_prefix = f'{args.prefix}_{idx:02d}'
+            csv_path = os.path.join(args.output_dir, f'{entry_prefix}.csv')
+            png_path = os.path.join(
+                args.output_dir,
+                f'{entry_prefix}_{safe_file_stem(solvent)}.png'
+            )
+            result = flsf_atom_explain(
+                model_path=args.model_path,
+                fluorophore_smiles=fluorophore,
+                solvent_smiles=solvent,
+                output_csv=csv_path,
+                output_png='' if args.no_images else png_path,
+                no_cuda=args.no_cuda
+            )
+            result = result.copy()
+            result.insert(0, 'entry_id', idx)
+            tables.append(result)
+            if not args.no_images:
+                image_paths.append(png_path)
+
+        merged = pd.concat(tables, ignore_index=True)
+        merged_csv_path = os.path.join(args.output_dir, f'{args.prefix}.csv')
+        merged.to_csv(merged_csv_path, index=False)
+        print(merged.sort_values(['entry_id', 'abs_contribution'], ascending=[True, False]).head(20).to_string(index=False))
+        print(f'\nSaved merged CSV to {merged_csv_path}')
         if not args.no_images:
-            print(f'Saved figure to {png_path}')
+            print('Saved figures:')
+            for image_path in image_paths:
+                print(image_path)
         return
 
     tables = []
     image_dirs = []
-    for idx, fluorophore in enumerate(fluorophores, start=1):
-        example_dir = os.path.join(args.output_dir, f'{idx:02d}_{safe_file_stem(fluorophore)}')
+    for idx, (fluorophore, solvent) in enumerate(entries, start=1):
+        example_dir = os.path.join(
+            args.output_dir,
+            f'{idx:02d}_{safe_file_stem(fluorophore)}__{safe_file_stem(solvent)}'
+        )
         merged = flsf_atom_explain_all_targets(
             model_root=args.model_root,
             fluorophore_smiles=fluorophore,
-            solvent_smiles=solvent_map[fluorophore],
+            solvent_smiles=solvent,
             model_prefix=args.model_prefix,
             targets=args.targets,
             output_png_dir='' if args.no_images else example_dir,
             no_cuda=args.no_cuda
         )
+        merged = merged.copy()
+        merged.insert(0, 'entry_id', idx)
         tables.append(merged)
         if not args.no_images:
             image_dirs.append(example_dir)
@@ -125,8 +148,8 @@ def main():
     result.to_csv(csv_path, index=False)
 
     rank_columns = [f'importance_rank_{target}' for target in args.targets]
-    preview_columns = ['fluorophore_smiles', 'atom_index', 'atom_symbol', 'overall_importance_rank'] + rank_columns
-    print(result.loc[:, preview_columns].sort_values(['fluorophore_smiles', 'overall_importance_rank']).head(30).to_string(index=False))
+    preview_columns = ['entry_id', 'fluorophore_smiles', 'solvent_smiles', 'atom_index', 'atom_symbol', 'overall_importance_rank'] + rank_columns
+    print(result.loc[:, preview_columns].sort_values(['entry_id', 'overall_importance_rank']).head(30).to_string(index=False))
     print(f'\nSaved CSV to {csv_path}')
     if not args.no_images:
         print('Saved example images under:')
